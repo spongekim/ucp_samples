@@ -28,7 +28,8 @@ from a2a.types import AgentCard
 import click
 from dotenv import load_dotenv
 from starlette.applications import Starlette
-from starlette.responses import FileResponse
+from starlette.requests import Request
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 import uvicorn
@@ -66,9 +67,20 @@ def make_sync(func):
     return wrapper
 
 
+async def health(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "healthy"})
+
+async def ready(request: Request) -> JSONResponse:
+    try:
+        from .agent import store
+        _ = store.search_products("") # Just validating availability
+        return JSONResponse({"status": "ready"})
+    except Exception as e:
+        return JSONResponse({"status": "not_ready", "error": str(e)}, status_code=503)
+
 @click.command()
-@click.option("--host", default="localhost")
-@click.option("--port", default=10999)
+@click.option("--host", default=os.getenv("AGENT_HOST", "0.0.0.0"))
+@click.option("--port", default=int(os.getenv("PORT", 10999)))
 @make_sync
 async def run(host, port):
     """Run the A2A business agent server.
@@ -104,6 +116,8 @@ async def run(host, port):
     routes = a2a_app.routes()
     routes.extend(
         [
+            Route("/health", health, methods=["GET"]),
+            Route("/ready", ready, methods=["GET"]),
             Route(
                 "/.well-known/ucp",
                 lambda _: FileResponse(base_path / "data" / "ucp.json"),
